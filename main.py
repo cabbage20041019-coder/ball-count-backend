@@ -124,13 +124,15 @@ def count_balls_in_image(img, input_base_name=""):
         drawn_label_points.append((x, y))
 
     def draw_detected_contour(cnt, number, thickness=2, font_scale=0.8):
-        cv2.drawContours(canvas_detected, [cnt], -1, (0, 255, 0), thickness)
         M = cv2.moments(cnt)
         if M["m00"] != 0:
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
         else:
             x, y, bw, bh = cv2.boundingRect(cnt)
             cX, cY = x + bw // 2, y + bh // 2
+        _, radius = cv2.minEnclosingCircle(cnt)
+        radius = max(8, min(45, int(radius)))
+        cv2.circle(canvas_detected, (cX, cY), radius, (0, 255, 0), thickness)
         draw_blue_number(number, cX, cY, font_scale)
 
     def draw_detected_circle(x, y, r, number, font_scale=0.6):
@@ -179,7 +181,9 @@ def count_balls_in_image(img, input_base_name=""):
             return
 
         _, _, cnt, cX, cY = max(candidates, key=lambda item: (item[0], item[1]))
-        cv2.drawContours(canvas_detected, [cnt], -1, (0, 255, 0), 2)
+        _, radius = cv2.minEnclosingCircle(cnt)
+        radius = max(8, min(45, int(radius)))
+        cv2.circle(canvas_detected, (cX, cY), radius, (0, 255, 0), 2)
         draw_blue_number(drawn_label_count + 1, cX, cY)
 
     def count_by_simple_distance(draw=False):
@@ -193,7 +197,6 @@ def count_balls_in_image(img, input_base_name=""):
         sure_fg = np.uint8(sure_fg)
 
         contours_centers, _ = cv2.findContours(sure_fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours_outer, _ = cv2.findContours(binary_simple, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detections = []
         for cnt in contours_centers:
@@ -208,21 +211,9 @@ def count_balls_in_image(img, input_base_name=""):
         detections.sort(key=lambda item: (item[1], item[0]))
 
         if draw:
-            drawable_outer = [
-                cnt
-                for cnt in contours_outer
-                if 1000 < cv2.contourArea(cnt) < 30000
-            ]
             for i, (cX, cY) in enumerate(detections, 1):
-                matched = None
-                for cnt in drawable_outer:
-                    if cv2.pointPolygonTest(cnt, (float(cX), float(cY)), False) >= 0:
-                        matched = cnt
-                        break
-                if matched is not None:
-                    draw_detected_contour(matched, i)
-                else:
-                    draw_detected_circle(cX, cY, 18, i)
+                radius = max(10, min(45, int(dist_transform[cY, cX] * 1.45)))
+                draw_detected_circle(cX, cY, radius, i)
 
         return len(detections), binary_simple
 
