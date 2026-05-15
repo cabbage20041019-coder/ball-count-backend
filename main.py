@@ -188,17 +188,19 @@ def count_balls_in_image(img, input_base_name=""):
 
     def count_by_simple_distance(draw=False):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         _, binary_simple = cv2.threshold(blurred, 145, 255, cv2.THRESH_BINARY)
         kernel = np.ones((5, 5), np.uint8)
         binary_simple = cv2.morphologyEx(binary_simple, cv2.MORPH_CLOSE, kernel, iterations=2)
         dist_transform = cv2.distanceTransform(binary_simple, cv2.DIST_L2, 5)
-        _, sure_fg = cv2.threshold(dist_transform, 0.42 * dist_transform.max(), 255, 0)
+        _, sure_fg = cv2.threshold(dist_transform, 0.50 * dist_transform.max(), 255, 0)
         sure_fg = np.uint8(sure_fg)
 
         contours_centers, _ = cv2.findContours(sure_fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detections = []
+        yy, xx = np.ogrid[:img_h, :img_w]
         for cnt in contours_centers:
             area = cv2.contourArea(cnt)
             if not (100 < area < 30000):
@@ -207,12 +209,40 @@ def count_balls_in_image(img, input_base_name=""):
             if M["m00"] == 0:
                 continue
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
-            detections.append((cX, cY))
+            radius = max(10, min(45, int(dist_transform[cY, cX] * 1.45)))
+            inner_radius = max(4, int(radius * 0.6))
+            inner_mask = (xx - cX) ** 2 + (yy - cY) ** 2 <= inner_radius ** 2
+            hsv_pixels = hsv[inner_mask]
+            turf_color_ratio = np.mean(
+                (hsv_pixels[:, 0] >= 20)
+                & (hsv_pixels[:, 0] <= 95)
+                & (hsv_pixels[:, 1] >= 20)
+                & (hsv_pixels[:, 2] >= 40)
+            )
+            local_diff = np.mean(diff_gray[inner_mask])
+            foreground_support = np.mean(binary_fixed[inner_mask] == 255)
+
+            small_turf_candidate = (
+                radius < 23
+                and turf_color_ratio > 0.42
+                and local_diff < 42
+                and foreground_support < 0.24
+            )
+            lower_turf_candidate = (
+                cY > int(img_h * 0.78)
+                and radius < 26
+                and turf_color_ratio > 0.34
+                and local_diff < 48
+                and foreground_support < 0.28
+            )
+            if small_turf_candidate or lower_turf_candidate:
+                continue
+
+            detections.append((cX, cY, radius))
         detections.sort(key=lambda item: (item[1], item[0]))
 
         if draw:
-            for i, (cX, cY) in enumerate(detections, 1):
-                radius = max(10, min(45, int(dist_transform[cY, cX] * 1.45)))
+            for i, (cX, cY, radius) in enumerate(detections, 1):
                 draw_detected_circle(cX, cY, radius, i)
 
         return len(detections), binary_simple
