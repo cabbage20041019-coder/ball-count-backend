@@ -368,7 +368,15 @@ def count_balls_in_image(img, input_base_name=""):
                     and r < r2 * 0.82
                     and np.hypot(x - x2, y - y2) < 0.82 * (r + r2)
                 ]
-                if r < 24 and len(larger_close_neighbors) >= 2:
+                strongly_overlapped = any(
+                    r < r2 * 0.72
+                    and np.hypot(x - x2, y - y2) < 0.70 * (r + r2)
+                    for x2, y2, r2 in detections
+                    if (x2, y2, r2) != (x, y, r)
+                )
+                if (r < 24 and len(larger_close_neighbors) >= 2) or (
+                    r < 22 and strongly_overlapped
+                ):
                     continue
                 pruned.append((x, y, r))
             return pruned
