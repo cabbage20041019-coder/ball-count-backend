@@ -235,7 +235,8 @@ def count_balls_in_image(img, input_base_name=""):
                 and local_diff < 48
                 and foreground_support < 0.28
             )
-            if small_turf_candidate or lower_turf_candidate:
+            bottom_edge_candidate = cY + radius > int(img_h * 0.985)
+            if small_turf_candidate or lower_turf_candidate or bottom_edge_candidate:
                 continue
 
             detections.append((cX, cY, radius))
@@ -287,9 +288,9 @@ def count_balls_in_image(img, input_base_name=""):
         if aspect_ratio < 0.75:
             min_dist, param2 = 46, 26
         elif aspect_ratio < 1.0:
-            min_dist, param2 = 46, 24
+            min_dist, param2 = 40, 24
         elif aspect_ratio < 1.3:
-            min_dist, param2 = 40, 26
+            min_dist, param2 = 34, 26
         else:
             min_dist, param2 = 24, 28
         if not apply_filter:
@@ -452,6 +453,15 @@ def count_balls_in_image(img, input_base_name=""):
                 and median_value > 210
                 and neighbor_count <= 1
             )
+            lower_isolated_turf_candidate = (
+                y > int(img_h * 0.78)
+                and neighbor_count <= 1
+                and turf_color_ratio > 0.30
+                and foreground_support < 0.30
+                and local_diff < 52
+                and ball_contrast < 30
+            )
+            bottom_edge_candidate = y + r > int(img_h * 0.985)
             shadow_like_candidate = (
                 median_value < 45
                 and ring_brightness > 80
@@ -473,7 +483,12 @@ def count_balls_in_image(img, input_base_name=""):
                 or shadow_candidate
                 or white_shadow_candidate
             ) and not turf_like_candidate and not weak_turf_candidate and not shadow_like_candidate and not red_like_candidate:
-                if dark_hole_candidate or lower_bright_false_candidate:
+                if (
+                    dark_hole_candidate
+                    or lower_bright_false_candidate
+                    or lower_isolated_turf_candidate
+                    or bottom_edge_candidate
+                ):
                     continue
                 filtered_circles.append((x, y, r))
 
@@ -486,7 +501,12 @@ def count_balls_in_image(img, input_base_name=""):
     large_count = count_large_isolated_balls()
     simple_count, simple_binary = count_by_simple_distance()
     dense_count = count_dense_pile(apply_filter=False)
-    dense_entry_threshold = 35 if aspect_ratio < 0.75 else 50
+    if aspect_ratio < 0.75:
+        dense_entry_threshold = 35
+    elif aspect_ratio < 1.3:
+        dense_entry_threshold = 40
+    else:
+        dense_entry_threshold = 50
 
     if aspect_ratio > 2.4:
         count_wide_row()
