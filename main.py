@@ -539,9 +539,6 @@ def count_balls_in_image(img, input_base_name=""):
                 draw_detected_circle(x, y, r, i)
         return len(filtered_circles)
 
-    large_count = count_large_isolated_balls()
-    simple_count, simple_binary = count_by_simple_distance()
-    dense_count = count_dense_pile(apply_filter=False)
     if aspect_ratio < 0.75:
         dense_entry_threshold = 35
     elif aspect_ratio < 1.3:
@@ -552,18 +549,23 @@ def count_balls_in_image(img, input_base_name=""):
     if aspect_ratio > 2.4:
         count_wide_row()
         mode = "wide_row"
-    elif dense_count >= dense_entry_threshold:
-        count_dense_pile(draw=True)
-        mode = "dense_pile"
-    elif simple_count <= 3 and large_count <= 2:
-        count_large_isolated_balls(draw=True)
-        mode = "large_isolated"
     else:
-        count_by_simple_distance(draw=True)
-        if large_count in {1, 3}:
-            draw_missing_large_isolated_number()
-        binary_fixed = simple_binary
-        mode = "simple_distance"
+        dense_count = count_dense_pile(apply_filter=False)
+        if dense_count >= dense_entry_threshold:
+            count_dense_pile(draw=True)
+            mode = "dense_pile"
+        else:
+            large_count = count_large_isolated_balls()
+            simple_count, simple_binary = count_by_simple_distance()
+            if simple_count <= 3 and large_count <= 2:
+                count_large_isolated_balls(draw=True)
+                mode = "large_isolated"
+            else:
+                count_by_simple_distance(draw=True)
+                if large_count in {1, 3}:
+                    draw_missing_large_isolated_number()
+                binary_fixed = simple_binary
+                mode = "simple_distance"
 
     cv2.putText(
         canvas_detected,
