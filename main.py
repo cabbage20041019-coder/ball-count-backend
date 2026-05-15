@@ -478,14 +478,19 @@ def count_balls_in_image(img, input_base_name=""):
                 and local_diff < 52
                 and ball_contrast < 30
             )
-            bottom_edge_candidate = y + r > int(img_h * 0.985)
-            top_left_edge_candidate = (
-                x < int(img_w * 0.24)
-                and y - r < int(img_h * 0.055)
+            near_image_edge = (
+                x - r < int(img_w * 0.03)
+                or x + r > int(img_w * 0.97)
+                or y - r < int(img_h * 0.055)
+                or y + r > int(img_h * 0.985)
+            )
+            weak_edge_candidate = (
+                near_image_edge
+                and neighbor_count <= 1
                 and (
                     median_value < 95
-                    or turf_color_ratio > 0.38
-                    or (foreground_support < 0.20 and local_diff < 45)
+                    or turf_color_ratio > 0.34
+                    or (foreground_support < 0.24 and local_diff < 48)
                 )
             )
             shadow_like_candidate = (
@@ -513,8 +518,7 @@ def count_balls_in_image(img, input_base_name=""):
                     dark_hole_candidate
                     or lower_bright_false_candidate
                     or lower_isolated_turf_candidate
-                    or bottom_edge_candidate
-                    or top_left_edge_candidate
+                    or weak_edge_candidate
                 ):
                     continue
                 filtered_circles.append((x, y, r))
