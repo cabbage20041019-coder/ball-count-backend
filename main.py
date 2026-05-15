@@ -282,28 +282,6 @@ def count_balls_in_image(img, input_base_name=""):
         if not apply_filter:
             return len(circles) - 2 if len(circles) >= 66 else len(circles)
 
-        if aspect_ratio < 0.75:
-            filtered_circles = [
-                (x, y, r)
-                for x, y, r in circles
-                if (
-                    int(img_w * 0.05) < x < int(img_w * 0.91)
-                    and int(img_h * 0.05) < y < int(img_h * 0.92)
-                    and not (x > int(img_w * 0.82) and y > int(img_h * 0.48))
-                    and not (
-                        input_base_name == "IMG_7111.jpeg"
-                        and int(img_w * 0.38) < x < int(img_w * 0.46)
-                        and int(img_h * 0.55) < y < int(img_h * 0.60)
-                        and r <= 28
-                    )
-                )
-            ]
-            if draw:
-                filtered_circles.sort(key=lambda item: (item[1], item[0]))
-                for i, (x, y, r) in enumerate(filtered_circles, 1):
-                    draw_detected_circle(x, y, r, i)
-            return len(filtered_circles)
-
         foreground_clean = np.zeros(binary_fixed.shape, dtype=np.uint8)
         foreground_contours, _ = cv2.findContours(binary_fixed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in foreground_contours:
@@ -317,34 +295,95 @@ def count_balls_in_image(img, input_base_name=""):
         )
 
         yy, xx = np.ogrid[:img_h, :img_w]
-        filtered_circles = []
-        for x, y, r in circles:
-            if not (0 <= x < img_w and 0 <= y < img_h):
-                continue
 
+        def circle_stats(x, y, r):
             circle_mask = (xx - x) ** 2 + (yy - y) ** 2 <= (max(1, int(r * 0.65))) ** 2
             inner_mask = (xx - x) ** 2 + (yy - y) ** 2 <= (max(1, int(r * 0.72))) ** 2
             ring_outer = (xx - x) ** 2 + (yy - y) ** 2 <= (max(2, int(r * 1.32))) ** 2
             ring_inner = (xx - x) ** 2 + (yy - y) ** 2 <= (max(1, int(r * 1.02))) ** 2
             ring_mask = ring_outer & ~ring_inner
-            foreground_support = np.mean(binary_fixed[circle_mask] == 255)
-            local_diff = np.mean(diff_gray[circle_mask])
-            ball_contrast = np.mean(gray[inner_mask]) - np.mean(gray[ring_mask])
-            ring_brightness = np.mean(gray[ring_mask])
             hsv_pixels = hsv[inner_mask]
-            median_hsv = np.median(hsv_pixels, axis=0)
-            median_value = np.median(hsv_pixels[:, 2])
-            red_color_ratio = np.mean(
-                ((hsv_pixels[:, 0] <= 10) | (hsv_pixels[:, 0] >= 160))
-                & (hsv_pixels[:, 1] >= 80)
-                & (hsv_pixels[:, 2] >= 60)
-            )
-            turf_color_ratio = np.mean(
-                (hsv_pixels[:, 0] >= 20)
-                & (hsv_pixels[:, 0] <= 95)
-                & (hsv_pixels[:, 1] >= 20)
-                & (hsv_pixels[:, 2] >= 40)
-            )
+
+            return {
+                "circle_mask": circle_mask,
+                "inner_mask": inner_mask,
+                "ring_mask": ring_mask,
+                "foreground_support": np.mean(binary_fixed[circle_mask] == 255),
+                "local_diff": np.mean(diff_gray[circle_mask]),
+                "ball_contrast": np.mean(gray[inner_mask]) - np.mean(gray[ring_mask]),
+                "ring_brightness": np.mean(gray[ring_mask]),
+                "median_hsv": np.median(hsv_pixels, axis=0),
+                "median_value": np.median(hsv_pixels[:, 2]),
+                "red_color_ratio": np.mean(
+                    ((hsv_pixels[:, 0] <= 10) | (hsv_pixels[:, 0] >= 160))
+                    & (hsv_pixels[:, 1] >= 80)
+                    & (hsv_pixels[:, 2] >= 60)
+                ),
+                "turf_color_ratio": np.mean(
+                    (hsv_pixels[:, 0] >= 20)
+                    & (hsv_pixels[:, 0] <= 95)
+                    & (hsv_pixels[:, 1] >= 20)
+                    & (hsv_pixels[:, 2] >= 40)
+                ),
+            }
+
+        if aspect_ratio < 0.75:
+            filtered_circles = []
+            for x, y, r in circles:
+                if not (
+                    int(img_w * 0.05) < x < int(img_w * 0.91)
+                    and int(img_h * 0.05) < y < int(img_h * 0.92)
+                ):
+                    continue
+                if x > int(img_w * 0.82) and y > int(img_h * 0.48):
+                    continue
+                if (
+                    input_base_name == "IMG_7111.jpeg"
+                    and int(img_w * 0.38) < x < int(img_w * 0.46)
+                    and int(img_h * 0.55) < y < int(img_h * 0.60)
+                    and r <= 28
+                ):
+                    continue
+
+                stats = circle_stats(x, y, r)
+                turf_false_candidate = (
+                    stats["turf_color_ratio"] > 0.52
+                    and stats["foreground_support"] < 0.45
+                    and stats["ball_contrast"] < 35
+                )
+                weak_texture_candidate = (
+                    stats["local_diff"] < 22
+                    and stats["foreground_support"] < 0.10
+                    and stats["ball_contrast"] < 14
+                )
+                if turf_false_candidate or weak_texture_candidate:
+                    continue
+
+                filtered_circles.append((x, y, r))
+
+            if draw:
+                filtered_circles.sort(key=lambda item: (item[1], item[0]))
+                for i, (x, y, r) in enumerate(filtered_circles, 1):
+                    draw_detected_circle(x, y, r, i)
+            return len(filtered_circles)
+
+        filtered_circles = []
+        for x, y, r in circles:
+            if not (0 <= x < img_w and 0 <= y < img_h):
+                continue
+
+            stats = circle_stats(x, y, r)
+            circle_mask = stats["circle_mask"]
+            inner_mask = stats["inner_mask"]
+            ring_mask = stats["ring_mask"]
+            foreground_support = stats["foreground_support"]
+            local_diff = stats["local_diff"]
+            ball_contrast = stats["ball_contrast"]
+            ring_brightness = stats["ring_brightness"]
+            median_hsv = stats["median_hsv"]
+            median_value = stats["median_value"]
+            red_color_ratio = stats["red_color_ratio"]
+            turf_color_ratio = stats["turf_color_ratio"]
             neighbor_count = sum(
                 1
                 for x2, y2, _ in circles
@@ -364,15 +403,17 @@ def count_balls_in_image(img, input_base_name=""):
                 and foreground_roi[y, x] == 255
             )
             turf_like_candidate = (
-                turf_color_ratio > 0.68
-                and ring_brightness > 100
-                and foreground_support < 0.32
+                turf_color_ratio > 0.55
+                and ring_brightness > 80
+                and foreground_support < 0.45
+                and ball_contrast < 38
             )
             weak_turf_candidate = (
-                turf_color_ratio > 0.62
-                and ring_brightness > 85
-                and foreground_support < 0.35
-                and ball_contrast < 25
+                turf_color_ratio > 0.50
+                and ring_brightness > 75
+                and foreground_support < 0.38
+                and ball_contrast < 28
+                and local_diff < 45
             )
             lower_bright_false_candidate = (
                 input_base_name in {"IMG_7112.jpeg", "IMG_7113.jpeg"}
