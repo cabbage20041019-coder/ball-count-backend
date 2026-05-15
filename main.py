@@ -1,9 +1,13 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
 import base64
+import json
+from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
+from secrets import token_urlsafe
 
 try:
     from PIL import Image, ImageOps
@@ -14,6 +18,24 @@ except ImportError:
     pillow_heif = None
 
 app = FastAPI()
+SHARED_RESULTS_PATH = Path("shared_results.json")
+
+
+def load_shared_results():
+    if not SHARED_RESULTS_PATH.exists():
+        return {}
+
+    try:
+        return json.loads(SHARED_RESULTS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_shared_results():
+    SHARED_RESULTS_PATH.write_text(json.dumps(shared_results))
+
+
+shared_results = load_shared_results()
 
 # フロントエンド（localhost:3000など）からのアクセスを許可
 app.add_middleware(
@@ -102,13 +124,15 @@ def count_balls_in_image(img, input_base_name=""):
         drawn_label_points.append((x, y))
 
     def draw_detected_contour(cnt, number, thickness=2, font_scale=0.8):
-        cv2.drawContours(canvas_detected, [cnt], -1, (0, 255, 0), thickness)
         M = cv2.moments(cnt)
         if M["m00"] != 0:
             cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
         else:
             x, y, bw, bh = cv2.boundingRect(cnt)
             cX, cY = x + bw // 2, y + bh // 2
+        _, radius = cv2.minEnclosingCircle(cnt)
+        radius = max(8, min(45, int(radius)))
+        cv2.circle(canvas_detected, (cX, cY), radius, (0, 255, 0), thickness)
         draw_blue_number(number, cX, cY, font_scale)
 
     def draw_detected_circle(x, y, r, number, font_scale=0.6):
@@ -157,7 +181,9 @@ def count_balls_in_image(img, input_base_name=""):
             return
 
         _, _, cnt, cX, cY = max(candidates, key=lambda item: (item[0], item[1]))
-        cv2.drawContours(canvas_detected, [cnt], -1, (0, 255, 0), 2)
+        _, radius = cv2.minEnclosingCircle(cnt)
+        radius = max(8, min(45, int(radius)))
+        cv2.circle(canvas_detected, (cX, cY), radius, (0, 255, 0), 2)
         draw_blue_number(drawn_label_count + 1, cX, cY)
 
     def count_by_simple_distance(draw=False):
@@ -171,7 +197,6 @@ def count_balls_in_image(img, input_base_name=""):
         sure_fg = np.uint8(sure_fg)
 
         contours_centers, _ = cv2.findContours(sure_fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours_outer, _ = cv2.findContours(binary_simple, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detections = []
         for cnt in contours_centers:
@@ -186,21 +211,9 @@ def count_balls_in_image(img, input_base_name=""):
         detections.sort(key=lambda item: (item[1], item[0]))
 
         if draw:
-            drawable_outer = [
-                cnt
-                for cnt in contours_outer
-                if 1000 < cv2.contourArea(cnt) < 30000
-            ]
             for i, (cX, cY) in enumerate(detections, 1):
-                matched = None
-                for cnt in drawable_outer:
-                    if cv2.pointPolygonTest(cnt, (float(cX), float(cY)), False) >= 0:
-                        matched = cnt
-                        break
-                if matched is not None:
-                    draw_detected_contour(matched, i)
-                else:
-                    draw_detected_circle(cX, cY, 18, i)
+                radius = max(10, min(45, int(dist_transform[cY, cX] * 1.45)))
+                draw_detected_circle(cX, cY, radius, i)
 
         return len(detections), binary_simple
 
@@ -451,3 +464,37 @@ async def count_balls(file: UploadFile = File(...)):
         "count": count,
         "processed_image": img_base64,
     }
+
+
+@app.post("/results")
+async def create_shared_result(payload: dict):
+    image_url = payload.get("imageUrl")
+    count = payload.get("count")
+
+    if not isinstance(image_url, str) or not image_url.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="imageUrl is required")
+
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="count must be an integer")
+
+    result_id = token_urlsafe(12)
+    shared_results[result_id] = {
+        "id": result_id,
+        "count": count,
+        "imageUrl": image_url,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    save_shared_results()
+
+    return {"id": result_id}
+
+
+@app.get("/results/{result_id}")
+async def get_shared_result(result_id: str):
+    result = shared_results.get(result_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="result not found")
+
+    return result
