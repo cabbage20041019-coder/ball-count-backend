@@ -19,6 +19,7 @@ except ImportError:
 
 app = FastAPI()
 SHARED_RESULTS_PATH = Path("shared_results.json")
+PROCESSED_IMAGE_JPEG_QUALITY = 72
 
 
 def load_shared_results():
@@ -591,7 +592,11 @@ async def count_balls(file: UploadFile = File(...)):
         return {"count": 0, "error": "画像読み込み失敗"}
 
     count, processed_img = count_balls_in_image(img, file.filename or "")
-    _, buffer = cv2.imencode(".jpg", processed_img)
+    _, buffer = cv2.imencode(
+        ".jpg",
+        processed_img,
+        [int(cv2.IMWRITE_JPEG_QUALITY), PROCESSED_IMAGE_JPEG_QUALITY],
+    )
     img_base64 = base64.b64encode(buffer).decode("utf-8")
 
     return {
