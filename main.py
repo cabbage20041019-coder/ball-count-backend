@@ -358,6 +358,21 @@ def count_balls_in_image(img, input_base_name=""):
                 ),
             }
 
+        def prune_boundary_duplicates(detections):
+            pruned = []
+            for x, y, r in detections:
+                larger_close_neighbors = [
+                    (x2, y2, r2)
+                    for x2, y2, r2 in detections
+                    if (x2, y2, r2) != (x, y, r)
+                    and r < r2 * 0.82
+                    and np.hypot(x - x2, y - y2) < 0.82 * (r + r2)
+                ]
+                if r < 24 and len(larger_close_neighbors) >= 2:
+                    continue
+                pruned.append((x, y, r))
+            return pruned
+
         if aspect_ratio < 0.75:
             filtered_circles = []
             for x, y, r in circles:
@@ -391,6 +406,8 @@ def count_balls_in_image(img, input_base_name=""):
                     continue
 
                 filtered_circles.append((x, y, r))
+
+            filtered_circles = prune_boundary_duplicates(filtered_circles)
 
             if draw:
                 filtered_circles.sort(key=lambda item: (item[1], item[0]))
@@ -462,6 +479,15 @@ def count_balls_in_image(img, input_base_name=""):
                 and ball_contrast < 30
             )
             bottom_edge_candidate = y + r > int(img_h * 0.985)
+            top_left_edge_candidate = (
+                x < int(img_w * 0.24)
+                and y - r < int(img_h * 0.055)
+                and (
+                    median_value < 95
+                    or turf_color_ratio > 0.38
+                    or (foreground_support < 0.20 and local_diff < 45)
+                )
+            )
             shadow_like_candidate = (
                 median_value < 45
                 and ring_brightness > 80
@@ -488,9 +514,12 @@ def count_balls_in_image(img, input_base_name=""):
                     or lower_bright_false_candidate
                     or lower_isolated_turf_candidate
                     or bottom_edge_candidate
+                    or top_left_edge_candidate
                 ):
                     continue
                 filtered_circles.append((x, y, r))
+
+        filtered_circles = prune_boundary_duplicates(filtered_circles)
 
         if draw:
             filtered_circles.sort(key=lambda item: (item[1], item[0]))
