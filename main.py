@@ -452,6 +452,12 @@ def count_balls_in_image(img, input_base_name=""):
             )
             visible_candidate = foreground_support > 0.12 or local_diff > 55
             shadow_candidate = ball_contrast > 18 and ring_brightness < 115 and neighbor_count >= 1
+            dark_cluster_candidate = (
+                median_value < 95
+                and neighbor_count >= 2
+                and foreground_roi[y, x] == 255
+                and (foreground_support > 0.05 or local_diff > 18 or ball_contrast > 6)
+            )
             white_shadow_candidate = (
                 median_hsv[1] < 75
                 and 45 < median_value < 190
@@ -487,18 +493,15 @@ def count_balls_in_image(img, input_base_name=""):
                 and local_diff < 52
                 and ball_contrast < 30
             )
-            near_image_edge = (
-                x - r < int(img_w * 0.03)
-                or x + r > int(img_w * 0.97)
+            near_wall_edge = (
+                x + r > int(img_w * 0.97)
                 or y - r < int(img_h * 0.055)
-                or y + r > int(img_h * 0.985)
             )
-            weak_edge_candidate = (
-                near_image_edge
+            weak_wall_edge_candidate = (
+                near_wall_edge
                 and neighbor_count <= 1
                 and (
-                    median_value < 95
-                    or turf_color_ratio > 0.34
+                    turf_color_ratio > 0.34
                     or (foreground_support < 0.24 and local_diff < 48)
                 )
             )
@@ -521,13 +524,16 @@ def count_balls_in_image(img, input_base_name=""):
                 near_foreground
                 or visible_candidate
                 or shadow_candidate
+                or dark_cluster_candidate
                 or white_shadow_candidate
-            ) and not turf_like_candidate and not weak_turf_candidate and not shadow_like_candidate and not red_like_candidate:
+            ) and not turf_like_candidate and not weak_turf_candidate and (
+                not shadow_like_candidate or dark_cluster_candidate
+            ) and not red_like_candidate:
                 if (
-                    dark_hole_candidate
+                    (dark_hole_candidate and not dark_cluster_candidate)
                     or lower_bright_false_candidate
                     or lower_isolated_turf_candidate
-                    or weak_edge_candidate
+                    or weak_wall_edge_candidate
                 ):
                     continue
                 filtered_circles.append((x, y, r))
